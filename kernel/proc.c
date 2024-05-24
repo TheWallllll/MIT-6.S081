@@ -140,6 +140,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  p->trace_mask = 0;                 //设置一个默认值，防止初始化时产生脏数据。
 
   return p;
 }
@@ -302,6 +303,8 @@ fork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+
+  np->trace_mask = p->trace_mask;  //子进程继承父进程的trace
 
   pid = np->pid;
 
