@@ -657,3 +657,17 @@ procdump(void)
     printf("\n");
   }
 }
+
+uint64
+processCount(void) {
+  struct proc* p;
+  uint count = 0;
+
+  //no lock, because we just read
+  for (p = proc;p < &proc[NPROC];p++) {
+    if (p->state != UNUSED)
+      count++;
+  }
+
+  return count;
+}
