@@ -80,7 +80,42 @@ sys_sleep(void)
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  uint64 va;        //first argument: the starting virtual address of the first user page
+  int num;          //second argument: the number of pages that need to check
+  uint64 uaddr;     //third argument: a user address to a buffer to store the results into a bitmask
+
+  //get the arguments
+  if (argaddr(0, &va) < 0)
+    return -1;
+  if (argint(1, &num) < 0)
+    return -1;
+  if (argaddr(2, &uaddr) < 0)
+    return -1;
+
+  uint32 bitmask = 0; //32bits mask, 32 is from test(user/pgtbltest)
+  uint64 mask = 1;
+  pte_t* pte;
+  struct proc* p = myproc();
+  if (num > 32 || num < 0)
+    return -1;
+
+  //遍历num个page
+  for (int i = 0;i < num;++i, va += PGSIZE) {
+    if (va > MAXVA)
+      return -1;
+    if ((pte = walk(p->pagetable, va, 0)) == 0)
+      return -1;
+    //check pte_a
+    if ((*pte) & PTE_A) {
+      bitmask |= (mask << i);
+      *pte &= ~PTE_A;
+    }
+  }
+
+  //copy bitmask to user space
+  if (copyout(p->pagetable, uaddr, (char*)&bitmask, sizeof(bitmask)) < 0)
+    return -1;
+
   return 0;
 }
 #endif
