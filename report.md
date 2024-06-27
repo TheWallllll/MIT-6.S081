@@ -43,6 +43,7 @@ In the first example above, trace invokes grep tracing just the read system call
 - Add a sys_trace() function in kernel/sysproc.c that implements the new system call by remembering its argument in a new variable in the proc structure (see kernel/proc.h). The functions to retrieve system call arguments from user space are in kernel/syscall.c, and you can see examples of their use in kernel/sysproc.c.
 - Modify fork() (see kernel/proc.c) to copy the trace mask from the parent to the child process.
 - Modify the syscall() function in kernel/syscall.c to print the trace output. You will need to add an array of syscall names to index into.
+
 **思路**
 添加一个系统调用：trace，接受一个参数——一个整数掩码，这个掩码的二进制位数，为1表示跟踪该系统调用。输出一行，包括进程id、系统调用的名称和返回值。需要跟踪调用trace的进程和他的子进程的所有需要跟踪的系统调用。已经给出了user space下的user/trace.c，需要注册并实现trace这一system call。
 1. 修改makefile
