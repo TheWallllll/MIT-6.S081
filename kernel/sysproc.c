@@ -108,6 +108,7 @@ sys_pgaccess(void)
     //check pte_a
     if ((*pte) & PTE_A) {
       bitmask |= (mask << i);
+      //clear PTE_A
       *pte &= ~PTE_A;
     }
   }
