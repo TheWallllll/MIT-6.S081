@@ -105,10 +105,43 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  //TODO:the alarm interval and the pointer to the handler function which sys_sigalarm() should store
-  //keep track of how many ticks have passed since the last call (or are left until the next call) 
-  //to a process's alarm handler;
-  int interval;
-  uint64 handler;
-  int ticks_cnt;
+
+  int interval;                //interval of alarm
+  uint64 handler;              //pointer to handler function
+  int ticks_cnt;               //how many ticks have passed since last call
+
+  int allow_entrance_handler;  //0 is not allow and 1 is allow
+  //32 registers
+  uint64 epc;
+  uint64 ra;
+  uint64 sp;
+  uint64 gp;
+  uint64 tp;
+  uint64 t0;
+  uint64 t1;
+  uint64 t2;
+  uint64 s0;
+  uint64 s1;
+  uint64 a0;
+  uint64 a1;
+  uint64 a2;
+  uint64 a3;
+  uint64 a4;
+  uint64 a5;
+  uint64 a6;
+  uint64 a7;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+  uint64 t3;
+  uint64 t4;
+  uint64 t5;
+  uint64 t6;
 };
