@@ -69,16 +69,22 @@ usertrap(void)
     // ok
   } else if (r_scause() == 13 || r_scause() == 15) {
     uint64 va = r_stval();
-    printf("Page fault %p\n", va);
-    uint64 ka = (uint64)kalloc();
-    if (ka == 0) {
+    //printf("Page fault %p\n", va);
+    if (va >= p->sz || va < p->trapframe->sp) {
+      //page-faults on a virtual memory address higher of equll than any allocated with sbrk() is invalid
+      //also lower than stack.
       p->killed = 1;
     } else {
-      memset((void*)ka, 0, PGSIZE);
-      va = PGROUNDDOWN(va);
-      if (mappages(p->pagetable, va, PGSIZE, ka, PTE_R | PTE_U | PTE_W) != 0) {
-        kfree((void*)ka);
+      uint64 ka = (uint64)kalloc();
+      if (ka == 0) {
         p->killed = 1;
+      } else {
+        memset((void*)ka, 0, PGSIZE);
+        va = PGROUNDDOWN(va);
+        if (mappages(p->pagetable, va, PGSIZE, ka, PTE_R | PTE_U | PTE_W) != 0) {
+          kfree((void*)ka);
+          p->killed = 1;
+        }
       }
     }
   } else {
