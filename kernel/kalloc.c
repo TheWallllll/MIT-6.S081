@@ -13,6 +13,8 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
+struct spinlock ref_cnt_lock;
+int ref_cnt[PHYSTOP >> 12];
 
 struct run {
   struct run *next;
@@ -27,6 +29,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&ref_cnt_lock, "refercnt");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -51,6 +54,14 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  acquire(&ref_cnt_lock);
+  if (ref_cnt[REFCNT_INDEX(pa)] >= 1)
+    ref_cnt[REFCNT_INDEX(pa)]--;
+  release(&ref_cnt_lock);
+  
+  if (ref_cnt[REFCNT_INDEX(pa)] > 0)
+    return;
+  
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -75,6 +86,10 @@ kalloc(void)
   if(r)
     kmem.freelist = r->next;
   release(&kmem.lock);
+
+  acquire(&ref_cnt_lock);
+  ref_cnt[REFCNT_INDEX(r)] = 1;
+  release(&ref_cnt_lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk

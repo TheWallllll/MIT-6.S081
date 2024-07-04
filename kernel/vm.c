@@ -81,7 +81,7 @@ pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
-    panic("walk");
+    panic("thiswalk");
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -303,22 +303,26 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
-
+//TODO:map the parent's physical pages into the child, instead of allocating new pages. 
+//Clear PTE_W in the PTEs of both child and parent.
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
+    //TODO:add comment
+    *pte &= (~PTE_W);              //
+    *pte |= PTE_RSW;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+
+    acquire(&ref_cnt_lock);
+    ref_cnt[REFCNT_INDEX(pa)]++;
+    release(&ref_cnt_lock);
+
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
-    }
   }
   return 0;
 
@@ -353,6 +357,16 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    //printf("%p\n", va0);
+    pte_t* pte = walk(pagetable, va0, 0);
+    if (pte == 0)
+      return -1;
+    if ((*pte & PTE_W) == 0 && (*pte & PTE_RSW) != 0) {
+      if (cow(pagetable, va0) < 0)
+        return -1;
+      pa0 = PTE2PA(*pte);
+    }
+    
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -431,4 +445,32 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+//When a page-fault occurs on a COW page, allocate a new page with kalloc(), 
+//copy the old page to the new page, and install the new page in the PTE with PTE_W set.
+//Return 0 on success, -1 on error.
+int
+cow(pagetable_t pagetable, uint64 va) {
+  if (va >= MAXVA)
+    return -1;
+
+  pte_t* pte = walk(pagetable, va, 0);
+  if (pte == 0)
+    return -1;
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_RSW) == 0 || (*pte & PTE_U) == 0)
+    return -1;
+
+  uint64 pa = PTE2PA(*pte);
+  uint64 ka = (uint64)kalloc();
+  if (ka == 0)
+    return -1;
+  memmove((void*)ka, (void*)pa, PGSIZE);
+
+  uint64 flags = PTE_FLAGS(*pte);
+  *pte = PA2PTE(ka) | flags | PTE_W;
+  *pte &= ~PTE_RSW;
+  kfree((void*)pa);
+
+  return 0;
 }
