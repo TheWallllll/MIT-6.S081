@@ -81,7 +81,7 @@ pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
-    panic("thiswalk");
+    panic("walk");
 
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
@@ -291,10 +291,10 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
-// Given a parent process's page table, copy
-// its memory into a child's page table.
-// Copies both the page table and the
-// physical memory.
+// Given a parent process's page table, 
+//map the parent's physical pages into the child, 
+//instead of allocating new pages.
+//Clear PTE_W in the PTEs of both child and parent.
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
@@ -303,22 +303,19 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-//TODO:map the parent's physical pages into the child, instead of allocating new pages. 
-//Clear PTE_W in the PTEs of both child and parent.
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
 
-    //TODO:add comment
-    *pte &= (~PTE_W);              //
-    *pte |= PTE_RSW;
+    *pte &= (~PTE_W);              //Clear PTE_W
+    *pte |= PTE_RSW;               //Set PTE_RSW
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
 
     acquire(&ref_cnt_lock);
-    ref_cnt[REFCNT_INDEX(pa)]++;
+    ref_cnt[REFCNT_INDEX(pa)]++;   //Increment the reference count
     release(&ref_cnt_lock);
 
     if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0)
@@ -354,17 +351,18 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    //When destva>=MAXVA, walkaddr() return0, if set it behind cow,
+    //walk() will panic due to destva over MAXVA
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
-    //printf("%p\n", va0);
     pte_t* pte = walk(pagetable, va0, 0);
     if (pte == 0)
       return -1;
     if ((*pte & PTE_W) == 0 && (*pte & PTE_RSW) != 0) {
       if (cow(pagetable, va0) < 0)
         return -1;
-      pa0 = PTE2PA(*pte);
+      pa0 = PTE2PA(*pte);          //don't forget to modify pa0
     }
     
     n = PGSIZE - (dstva - va0);
@@ -468,9 +466,9 @@ cow(pagetable_t pagetable, uint64 va) {
   memmove((void*)ka, (void*)pa, PGSIZE);
 
   uint64 flags = PTE_FLAGS(*pte);
-  *pte = PA2PTE(ka) | flags | PTE_W;
+  *pte = PA2PTE(ka) | flags | PTE_W;    //reset flags for pte
   *pte &= ~PTE_RSW;
-  kfree((void*)pa);
+  kfree((void*)pa);                     //actually, it just sub 1 from the counter of pa
 
   return 0;
 }
