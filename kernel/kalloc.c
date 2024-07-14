@@ -84,24 +84,30 @@ kalloc(void)
   int cpunum = cpuid();
 
   acquire(&kmem[cpunum].lock);
-  r = kmem[cpunum].freelist;
-  if (r)
-    kmem[cpunum].freelist = r->next;
-  release(&kmem[cpunum].lock);
-  if(!r) {//steal one page from other CPU's freelist
+  if(!kmem[cpunum].freelist) {//steal 128 page from other CPU's freelist
+    int stealnum = 128;
     for (int i = 0;i < NCPU;++i) {
       if (i == cpunum)
         continue;
       acquire(&kmem[i].lock);
-      if (kmem[i].freelist) {
-        r = kmem[i].freelist;
-        kmem[i].freelist = kmem[i].freelist->next;
-        release(&kmem[i].lock);
-        break;
+      struct run* tmp = kmem[i].freelist;
+      while (tmp && stealnum) {
+        kmem[i].freelist = tmp->next;
+        tmp->next = kmem[cpunum].freelist;
+        kmem[cpunum].freelist = tmp;
+        tmp = kmem[i].freelist;
+        stealnum--;
       }
       release(&kmem[i].lock);
+      if (!stealnum)
+        break;
     }
   }
+
+  r = kmem[cpunum].freelist;
+  if (r)
+    kmem[cpunum].freelist = r->next;
+  release(&kmem[cpunum].lock);
   pop_off();
 
   if(r)
