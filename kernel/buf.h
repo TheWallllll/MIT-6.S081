@@ -5,7 +5,7 @@ struct buf {
   uint blockno;
   struct sleeplock lock;
   uint refcnt;
-  uint time;
+  uint time;   //used to keep track of the least-recently-used buf
   struct buf *next;
   uchar data[BSIZE];
 };

@@ -30,9 +30,7 @@ struct {
   struct spinlock locks[NBUCKET];
   struct buf buf[NBUF];
 
-  // Linked list of all buffers, through prev/next.
-  // Sorted by how recently the buffer was used.
-  // head.next is most recent, head.prev is least.
+  //hash map: every bucket is a singly linked list
   struct buf bufmap[NBUCKET];
 } bcache;
 
@@ -41,12 +39,14 @@ binit(void)
 {
   struct buf* b;
 
+  //Initialize bufmap
   for (int i = 0; i < NBUCKET; ++i) {
     initlock(&bcache.locks[i], "bcache_bufmap");
     bcache.bufmap[i].next = 0;
   }
 
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
+  //Initialize buffers
+  for (b = bcache.buf; b < bcache.buf + NBUF; b++) {
     b->time = 0;
     b->refcnt = 0;
     initsleeplock(&b->lock, "buffer");
@@ -76,6 +76,12 @@ bget(uint dev, uint blockno)
     }
   }
 
+  //Not cached
+
+  //to get a suitable block to reuse, we need to search for one in other buckets,
+  //which, however, may generate deadlock. For example, bucket[key] hold its own lock,
+  //and it acquire lock[B], bucket[B] hold its own lock and acquire lock[key].
+  //so we just search in the NBUCKET/2(include itself) ont the left of the bucket[key].
   uint bucketnum = NBUCKET / 2;
   struct buf* before_target = 0;
   uint holdlock = -1;
