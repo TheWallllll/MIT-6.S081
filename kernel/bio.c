@@ -32,6 +32,7 @@ struct {
 
   //hash map: every bucket is a singly linked list
   struct buf bufmap[NBUCKET];
+  struct spinlock eviction_lock;
 } bcache;
 
 void
@@ -53,6 +54,8 @@ binit(void)
     b->next = bcache.bufmap[0].next;
     bcache.bufmap[0].next = b;
   }
+
+  initlock(&bcache.eviction_lock, "bcache_eviction");
 }
 
 // Look through buffer cache for block on device dev.
@@ -77,23 +80,34 @@ bget(uint dev, uint blockno)
   }
 
   //Not cached
-
-  //to get a suitable block to reuse, we need to search for one in other buckets,
+  release(&bcache.locks[key]);
+  //to get a suitable block to reuse, we need to search for one in all buckets,
   //which, however, may generate deadlock. For example, bucket[key] hold its own lock,
   //and it acquire lock[B], bucket[B] hold its own lock and acquire lock[key].
-  //so we just search in the NBUCKET/2(include itself) ont the left of the bucket[key].
-  uint bucketnum = NBUCKET / 2;
+  //so we release lock[key]. But we need a new lock to protect the invariant. 
+  //Because if one thread release lock[key], and search for a block in other buckets,
+  //other thread can acquire lock[key] and this thread find no cache, so it will search too.
+  //Finally, the block who's number is blockno will have two identical cache.
+  acquire(&bcache.eviction_lock);
+  for(b = bcache.bufmap[key].next; b; b = b->next){
+    if (b->dev == dev && b->blockno == blockno) {
+      acquire(&bcache.locks[key]);
+      b->refcnt++;
+      release(&bcache.locks[key]);
+      release(&bcache.eviction_lock);
+      acquiresleep(&b->lock);
+      return b;
+    }
+  }
+
   struct buf* before_target = 0;
   uint holdlock = -1;
-  for (int i = 0; i < bucketnum; ++i) {
-    int index = key - i;
-    if (index < 0)
-      index += NBUCKET;
-    if (index != key)
-      acquire(&bcache.locks[index]);
+  for (int i = 0; i < NBUCKET; ++i) {
+
+    acquire(&bcache.locks[i]);
 
     int newfound = 0;
-    for (b = &bcache.bufmap[index]; b->next; b = b->next) {
+    for (b = &bcache.bufmap[i]; b->next; b = b->next) {
       if (b->next->refcnt == 0 && (before_target == 0 || b->next->time < before_target->next->time)) {
         before_target = b;
         newfound = 1;
@@ -101,12 +115,12 @@ bget(uint dev, uint blockno)
     }
 
     if (newfound) {
-      if (holdlock != -1 && holdlock!=key)
+      if (holdlock != -1)
         release(&bcache.locks[holdlock]);
-      holdlock = index;
+      holdlock = i;
     }
-    else if (index != key) {
-      release(&bcache.locks[index]);
+    else {
+      release(&bcache.locks[i]);
     }
   }
 
@@ -118,6 +132,7 @@ bget(uint dev, uint blockno)
   if (holdlock != key) {
     before_target->next = b->next;
     release(&bcache.locks[holdlock]);
+    acquire(&bcache.locks[key]);
     b->next = bcache.bufmap[key].next;
     bcache.bufmap[key].next = b;
   }
@@ -127,6 +142,7 @@ bget(uint dev, uint blockno)
   b->valid = 0;
   b->refcnt = 1;
   release(&bcache.locks[key]);
+  release(&bcache.eviction_lock);
   acquiresleep(&b->lock);
 
   return b;
