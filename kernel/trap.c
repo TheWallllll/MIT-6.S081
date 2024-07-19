@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -27,6 +31,47 @@ void
 trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
+}
+
+int mmap_handler(uint64 va) {
+  struct proc* p = myproc();
+  if (va < p->trapframe->sp || va >= p->sz)
+    return -1;
+
+  struct vma* v = 0;
+  for (int i = 0; i < NVMA; ++i) {
+    struct vma* vv = &p->vmas[i];
+    if (vv->valid && va >= vv->addr && va < vv->addr + vv->len) {
+      v = vv;
+      break;
+    }
+  }
+  if (v == 0) return -1;
+
+  int pte_flags = PTE_U;
+  if (v->prot & PROT_READ) pte_flags |= PTE_R;
+  if (v->prot & PROT_WRITE) pte_flags |= PTE_W;
+  if (v->prot & PROT_EXEC) pte_flags |= PTE_X;
+
+  uint64 ka = (uint64)kalloc();
+  if (ka == 0) return -1;
+  memset((void*)ka, 0, PGSIZE);
+
+  ilock(v->f->ip);
+  int offset = v->offset + PGROUNDDOWN(va - v->addr);
+  if (readi(v->f->ip, 0, ka, offset, PGSIZE) <= 0) {
+    iunlock(v->f->ip);
+    kfree((void*)ka);
+    return -1;
+  }
+  iunlock(v->f->ip);
+
+  if (mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, ka, pte_flags) < 0) {
+    kfree((void*)ka);
+    return -1;
+  }
+  
+  return 0;
 }
 
 //
@@ -67,6 +112,13 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    uint64 va = r_stval();
+    if (mmap_handler(va) < 0) {
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

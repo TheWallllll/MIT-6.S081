@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -134,6 +135,8 @@ found:
     release(&p->lock);
     return 0;
   }
+
+  memset(&p->vmas, 0, sizeof(p->vmas));
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -301,6 +304,14 @@ fork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  for (int i = 0;i < NVMA;++i) {
+    struct vma* vv = &p->vmas[i];
+    if (vv->valid) {
+      np->vmas[i] = *vv;
+      filedup(vv->f);
+    }
+  }
+
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -350,6 +361,18 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  for (int i = 0;i < NVMA;++i) {
+    struct vma* vv = &p->vmas[i];
+    if (vv->valid) {
+      if ((vv->flags == MAP_SHARED) && (vv->prot & PROT_WRITE)) {
+        filewrite(vv->f, vv->addr, vv->len);
+      }
+      uvmunmap(p->pagetable, vv->addr, vv->len / PGSIZE, 1);
+      fileclose(vv->f);
+      vv->valid = 0;
     }
   }
 

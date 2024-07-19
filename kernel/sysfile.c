@@ -484,3 +484,86 @@ sys_pipe(void)
   }
   return 0;
 }
+
+#define ERR 0xffffffffffffffff
+
+uint64
+sys_mmap(void)
+{
+  uint64 addr;
+  int len, prot, flags, fd, offset;
+  struct file* f;
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0 || argint(2, &prot) < 0
+    || argint(3, &flags) < 0 || argfd(4, &fd, &f) < 0 || argint(5, &offset) < 0)
+    return ERR;
+
+  if (f->writable == 0 && (prot & PROT_WRITE) && flags != MAP_PRIVATE)
+    return ERR;
+
+  struct proc* p = myproc();
+
+  if (p->sz + len > MAXVA)
+    return ERR;
+
+  for (int i = 0; i < NVMA;++i) {
+    struct vma* vv = &p->vmas[i];
+    if (vv->valid == 0) {
+      vv->valid = 1;
+      vv->addr = p->sz;
+      vv->len = len;
+      vv->prot = prot;
+      vv->flags = flags;
+      vv->f = filedup(f);
+      vv->offset = offset;
+
+      p->sz += len;
+      return vv->addr;
+    }
+  }
+
+  return ERR;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int len;
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+    return -1;
+
+  struct proc* p = myproc();
+  struct vma* v = 0;
+  for (int i = 0;i < NVMA;++i) {
+    struct vma* vv = &p->vmas[i];
+    if (vv->valid && vv->len >= len) {
+      if (addr == vv->addr) {
+        vv->addr += len;
+        vv->len -= len;
+        v = vv;
+        break;
+      }
+      if (addr + len == vv->addr + vv->len) {
+        vv->len -= len;
+        v = vv;
+        break;
+      }
+    }
+  }
+  if (v == 0) {
+    return -1;
+  }
+
+  if ((v->flags == MAP_SHARED) && (v->prot & PROT_WRITE)) {
+    filewrite(v->f, addr, len);
+  }
+
+  uvmunmap(p->pagetable, addr, len / PGSIZE, 1);
+
+  if (v->len == 0) {
+    v->valid = 0;
+    fileclose(v->f);
+  }
+
+  return 0;
+}
