@@ -35,9 +35,11 @@ trapinithart(void)
 
 int mmap_handler(uint64 va) {
   struct proc* p = myproc();
+  // va must between stack and the top of heap
   if (va < p->trapframe->sp || va >= p->sz)
     return -1;
 
+  // find which vma.
   struct vma* v = 0;
   for (int i = 0; i < NVMA; ++i) {
     struct vma* vv = &p->vmas[i];
@@ -48,6 +50,7 @@ int mmap_handler(uint64 va) {
   }
   if (v == 0) return -1;
 
+  // set flags of the virtual page
   int pte_flags = PTE_U;
   if (v->prot & PROT_READ) pte_flags |= PTE_R;
   if (v->prot & PROT_WRITE) pte_flags |= PTE_W;
@@ -57,6 +60,7 @@ int mmap_handler(uint64 va) {
   if (ka == 0) return -1;
   memset((void*)ka, 0, PGSIZE);
 
+  // read the file to the physical page
   ilock(v->f->ip);
   int offset = v->offset + PGROUNDDOWN(va - v->addr);
   if (readi(v->f->ip, 0, ka, offset, PGSIZE) <= 0) {

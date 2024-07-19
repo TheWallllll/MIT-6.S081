@@ -497,14 +497,18 @@ sys_mmap(void)
     || argint(3, &flags) < 0 || argfd(4, &fd, &f) < 0 || argint(5, &offset) < 0)
     return ERR;
 
+  //It's not allowed that the file is not writable, but mapped vma is writable and map_share
+  //(should write to file), 
   if (f->writable == 0 && (prot & PROT_WRITE) && flags != MAP_PRIVATE)
     return ERR;
 
   struct proc* p = myproc();
 
+  //There is not enough vma
   if (p->sz + len > MAXVA)
     return ERR;
 
+  //find a invalid vma structure
   for (int i = 0; i < NVMA;++i) {
     struct vma* vv = &p->vmas[i];
     if (vv->valid == 0) {
@@ -513,7 +517,7 @@ sys_mmap(void)
       vv->len = len;
       vv->prot = prot;
       vv->flags = flags;
-      vv->f = filedup(f);
+      vv->f = filedup(f);    //increase a reference to the file
       vv->offset = offset;
 
       p->sz += len;
@@ -537,12 +541,14 @@ sys_munmap(void)
   for (int i = 0;i < NVMA;++i) {
     struct vma* vv = &p->vmas[i];
     if (vv->valid && vv->len >= len) {
+      // begin of the vma
       if (addr == vv->addr) {
         vv->addr += len;
         vv->len -= len;
         v = vv;
         break;
       }
+      // end of the vma
       if (addr + len == vv->addr + vv->len) {
         vv->len -= len;
         v = vv;
@@ -554,12 +560,14 @@ sys_munmap(void)
     return -1;
   }
 
+  //writeback
   if ((v->flags == MAP_SHARED) && (v->prot & PROT_WRITE)) {
     filewrite(v->f, addr, len);
   }
 
   uvmunmap(p->pagetable, addr, len / PGSIZE, 1);
 
+  //if all vma unmap, reduce a reference of the file
   if (v->len == 0) {
     v->valid = 0;
     fileclose(v->f);
