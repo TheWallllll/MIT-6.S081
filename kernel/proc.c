@@ -30,16 +30,6 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -121,6 +111,19 @@ found:
     return 0;
   }
 
+  //为每个进程创建独立的内核页.
+  p->k_pagetable = kvminit_newpgtbl();
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  char *pa = kalloc();
+  if (pa == 0)
+    panic("kalloc");
+  //每个进程有自己的内核页，因此可以将内核栈映射到一个固定的地方
+  uint64 va = KSTACK((int)0);
+  kvmmap(p->k_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -128,6 +131,21 @@ found:
   p->context.sp = p->kstack + PGSIZE;
 
   return p;
+}
+
+void
+kvm_free_kernelpgtbl(pagetable_t pgtbl) {
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pgtbl[i];
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+      // this PTE points to a lower-level page table.
+      uint64 child = PTE2PA(pte);
+      kvm_free_kernelpgtbl((pagetable_t)child);
+      pgtbl[i] = 0;
+    }
+  }
+  kfree((void*)pgtbl);
 }
 
 // free a proc structure and the data hanging from it,
@@ -149,6 +167,16 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+
+  void *kstack_pa = (void*)kvmpa(p->k_pagetable, p->kstack);
+  kfree(kstack_pa);
+  p->kstack = 0;
+
+  //递归释放进程独享的页表，释放页表本身所占用的空间
+  //但**不释放页表指向的物理页**
+  kvm_free_kernelpgtbl(p->k_pagetable);
+  p->k_pagetable = 0;
+
   p->state = UNUSED;
 }
 
@@ -473,7 +501,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        //加载进程的内核页到cpu的satp寄存器。
+        w_satp(MAKE_SATP(p->k_pagetable));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
+
+        //没有进程运行时使用kernel_pagetable
+        kvminithart();
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
