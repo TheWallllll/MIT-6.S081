@@ -49,6 +49,7 @@ fork时，子进程不立即分配物理页，而是创建page table指向父进
 - 在usertrap调用上述函数。在copyout中同样如果此，需要注意的是调用时机，因为有可能只是一个普通的copyout，此时没有cow。
 
 **容易出错的点**，其实是面向测试程序编程，完善代码。
+
 - 标志位设置问题。
 - 新定义的cow函数中，对maxva的检查，这点在后边的测试程序中会有相应的测试。
 - cow.c中最后释放kfree()一定要有。
@@ -58,5 +59,5 @@ fork时，子进程不立即分配物理页，而是创建page table指向父进
     if(pa0 == 0)
       return -1;
   ```
-    有一种可能的情况，传入copyout的dstva过大，如果这段代码在cow之后出现，虽然可以省略最后重新修改pa0的情况，但是walk在面对超过MAXVA的地址会直接panic，而walkaddr则是return 0，因此需要先进行walkaddr。
+  有一种可能的情况，传入copyout的dstva过大，如果这段代码在cow之后出现，虽然可以省略最后重新修改pa0的情况，但是walk在面对超过MAXVA的地址会直接panic，而walkaddr则是return 0，因此需要先进行walkaddr。
 - 上述问题中，不要忘记最后重新修改pa0。

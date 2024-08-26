@@ -309,8 +309,14 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
 
+    //only writable.
+    //if only readable, we can't set rsw, because it will become
+    //as same as writable, and after cow() it will become writable
+    if(*pte & PTE_W) {
     *pte &= (~PTE_W);              //Clear PTE_W
     *pte |= PTE_RSW;               //Set PTE_RSW
+    }
+
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
 
